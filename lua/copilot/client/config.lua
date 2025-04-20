@@ -64,7 +64,8 @@ function M.prepare_client_config(overrides, client)
 
   local settings = { ---@type copilot_settings
     telemetry = { ---@type github_settings_telemetry
-      telemetryLevel = "all",
+      -- telemetryLevel = "all",
+      telemetryLevel = "off", -- test this to see if it works
     },
   }
 
