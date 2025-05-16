@@ -1,0 +1,69 @@
+name: Rebase from Upstream
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  rebase:
+    runs-on: ubuntu-latest
+    env:
+      REBASE_UPSTREAM_PAT: ${{ secrets.REBASE_UPSTREAM_PAT }}
+    steps:
+      - name: Checkout (with PAT)
+        if: env.REBASE_UPSTREAM_PAT != ''
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ env.REBASE_UPSTREAM_PAT }}
+
+      - name: Checkout (with GITHUB_TOKEN)
+        if: env.REBASE_UPSTREAM_PAT == ''
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git identity
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Check if rebase needed
+        id: check
+        run: |
+          git remote add upstream https://github.com/zbirenbaum/copilot.lua.git
+          git fetch upstream
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo "already_up_to_date=true" >> $GITHUB_OUTPUT
+            echo "Repository is already up to date"
+          else
+            echo "Rebase needed"
+          fi
+
+      - name: Rebase onto upstream/master
+        if: steps.check.outputs.already_up_to_date != 'true'
+        run: |
+          git checkout master
+          git rebase upstream/master
+
+      - name: Avoid pushing workflow changes without PAT
+        if: steps.check.outputs.already_up_to_date != 'true' && env.REBASE_UPSTREAM_PAT == ''
+        run: |
+          git fetch origin --no-tags --prune --depth=1 master || true
+          CHANGED=$(git diff --name-only origin/master...HEAD -- '.github/workflows/*' || true)
+          if [ -n "$CHANGED" ]; then
+            echo "Reverting workflow changes to avoid permission error..."
+            git restore --source origin/master --worktree --staged -- .github/workflows || true
+            if ! git diff --cached --quiet; then
+              git commit -m "chore(ci): keep local workflow files to avoid GitHub App workflow-permission rejection"
+            fi
+          fi
+
+      - name: Push rebased master
+        if: steps.check.outputs.already_up_to_date != 'true'
+        run: |
+          git push --force-with-lease origin master
